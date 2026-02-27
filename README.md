@@ -37,13 +37,13 @@
 
 - Python 3.8 或更高版本
 - ESP-IDF 开发环境
-- MCP 客户端（如 Claude Desktop、Cursor 等）
+- MCP 客户端（如 Claude Desktop、Cursor、Trae 等）
 
 ### 安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/ESP32-MCP.git
+git clone https://github.com/YangGuo00/ESP32-MCP.git
 cd ESP32-MCP
 
 # 安装依赖

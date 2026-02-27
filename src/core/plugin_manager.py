@@ -31,6 +31,11 @@ class PluginManager:
             if not os.path.isdir(plugin_path):
                 continue
 
+            plugin_file = os.path.join(plugin_path, "plugin.py")
+            if not os.path.exists(plugin_file):
+                self.logger.warning(f"插件 {plugin_name} 缺少 plugin.py 文件")
+                continue
+
             if self._load_plugin(plugin_name, plugin_path, config):
                 loaded_count += 1
 

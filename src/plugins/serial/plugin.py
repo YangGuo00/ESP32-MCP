@@ -134,6 +134,27 @@ class SerialPlugin(PluginInterface):
                         }
                     }
                 }
+            },
+            {
+                "name": "serial.read_log_file",
+                "description": "读取串口日志文件",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "日志文件路径"
+                        },
+                        "lines": {
+                            "type": "integer",
+                            "description": "读取的行数（默认 100）"
+                        },
+                        "filter": {
+                            "type": "string",
+                            "description": "过滤关键词"
+                        }
+                    }
+                }
             }
         ]
 
@@ -156,6 +177,8 @@ class SerialPlugin(PluginInterface):
                 return self._stop_monitor(arguments)
             elif tool_name == "serial.get_monitor_data":
                 return self._get_monitor_data(arguments)
+            elif tool_name == "serial.read_log_file":
+                return self._read_log_file(arguments)
             else:
                 return {
                     "success": False,
@@ -361,6 +384,50 @@ class SerialPlugin(PluginInterface):
             return {
                 "success": False,
                 "error": f"获取监控数据失败: {str(e)}"
+            }
+
+    def _read_log_file(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """读取串口日志文件"""
+        try:
+            file_path = arguments.get("file_path", "")
+            lines = arguments.get("lines", 100)
+            filter_keyword = arguments.get("filter", "")
+
+            if not file_path:
+                return {
+                    "success": False,
+                    "error": "未指定日志文件路径"
+                }
+
+            if not os.path.exists(file_path):
+                return {
+                    "success": False,
+                    "error": f"日志文件不存在: {file_path}"
+                }
+
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                all_lines = f.readlines()
+
+            if filter_keyword:
+                filtered_lines = [line for line in all_lines if filter_keyword.lower() in line.lower()]
+            else:
+                filtered_lines = all_lines
+
+            if lines > 0:
+                filtered_lines = filtered_lines[-lines:]
+            else:
+                filtered_lines = filtered_lines
+
+            return {
+                "success": True,
+                "message": f"读取了 {len(filtered_lines)} 行日志",
+                "data": filtered_lines
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"读取日志文件失败: {str(e)}"
             }
 
     def _monitor_loop(self):

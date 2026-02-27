@@ -105,9 +105,31 @@ def load_env_config() -> Dict[str, Any]:
     esp_idf_path = os.getenv('ESP_IDF_PATH')
     if esp_idf_path:
         config['esp_idf_path'] = esp_idf_path
+    else:
+        config['esp_idf_path'] = find_esp_idf_path()
 
     log_level = os.getenv('LOG_LEVEL')
     if log_level:
         config['log_level'] = log_level
 
     return config
+
+
+def find_esp_idf_path() -> str:
+    """自动查找ESP-IDF安装路径"""
+    common_paths = [
+        os.path.join(os.environ.get('USERPROFILE', ''), '.espressif', 'esp-idf'),
+        os.path.join('C:', 'Espressif', 'esp-idf'),
+        os.path.join('C:', 'Users', os.environ.get('USERNAME', ''), '.espressif', 'esp-idf'),
+        os.path.join(os.environ.get('HOME', ''), '.espressif', 'esp-idf'),
+    ]
+
+    idf_path = os.environ.get('IDF_PATH')
+    if idf_path and os.path.exists(idf_path):
+        return idf_path
+
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+
+    return ""

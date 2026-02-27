@@ -27,12 +27,14 @@ class IDFPlugin(PluginInterface):
             self.project_path = config.get("project_path", os.getcwd())
 
             if not self.esp_idf_path:
-                self.logger.error("未设置 ESP_IDF_PATH")
-                return False
+                self.logger.warning("未设置 ESP_IDF_PATH，IDF 功能将不可用")
+                self.executor = None
+                return True
 
             if not os.path.exists(self.esp_idf_path):
-                self.logger.error(f"ESP-IDF 路径不存在: {self.esp_idf_path}")
-                return False
+                self.logger.warning(f"ESP-IDF 路径不存在: {self.esp_idf_path}，IDF 功能将不可用")
+                self.executor = None
+                return True
 
             self.executor = CommandExecutor(working_dir=self.project_path)
             self.logger.info(f"IDF 插件初始化成功，ESP-IDF 路径: {self.esp_idf_path}")
