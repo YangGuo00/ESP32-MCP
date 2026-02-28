@@ -12,13 +12,12 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Load environment variables from .env file
-print("Loading configuration from .env file...")
+# print("Loading configuration from .env file...")
 load_dotenv()
 # Set required environment variable for FastMCP 2.8.1+
-os.environ.setdefault('FASTMCP_LOG_LEVEL', 'INFO')
+os.environ.setdefault('FASTMCP_LOG_LEVEL', 'WARNING')
 
 from fastmcp import FastMCP
-from mcp.types import ToolAnnotations
 
 from src.plugins.idf.plugin import IDFPlugin
 from src.plugins.serial.plugin import SerialPlugin
@@ -39,6 +38,20 @@ log_level = config.get("log_level", "INFO")
 set_log_level(log_level)
 logger = get_logger(__name__)
 
+# Redirect all logging to stderr to avoid interfering with MCP protocol
+import logging
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+for name, log in logging.Logger.manager.loggerDict.items():
+    if isinstance(log, logging.Logger):
+        for handler in log.handlers[:]:
+            log.removeHandler(handler)
+            if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout:
+                new_handler = logging.StreamHandler(sys.stderr)
+                new_handler.setLevel(handler.level)
+                new_handler.setFormatter(handler.formatter)
+                log.addHandler(new_handler)
+
 # Initialize plugins
 idf_plugin = IDFPlugin()
 serial_plugin = SerialPlugin()
@@ -55,102 +68,57 @@ logger_plugin.initialize(config.get("plugins", {}).get("logger", {}))
 mcp = FastMCP("ESP32-MCP Server")
 
 # Register IDF tools
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Build ESP32 Project",
-        description="Compile ESP32 project using idf.py build",
-    ),
-)
+@mcp.tool()
 def idf_build(target: str = None):
-    """Compile ESP32 project."""
+    """Compile ESP32 project using idf.py build"""
     arguments = {}
     if target:
         arguments["target"] = target
     return idf_plugin.execute_tool("idf.build", arguments)
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Flash ESP32",
-        description="Flash firmware to ESP32 device",
-    ),
-)
+@mcp.tool()
 def idf_flash(port: str = None, baud: int = 460800):
-    """Flash firmware to ESP32."""
+    """Flash firmware to ESP32 device"""
     arguments = {}
     if port:
         arguments["port"] = port
     arguments["baud"] = baud
     return idf_plugin.execute_tool("idf.flash", arguments)
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Erase ESP32 Flash",
-        description="Erase ESP32 Flash memory",
-    ),
-)
+@mcp.tool()
 def idf_erase_flash(port: str = None):
-    """Erase ESP32 Flash."""
+    """Erase ESP32 Flash"""
     arguments = {}
     if port:
         arguments["port"] = port
     return idf_plugin.execute_tool("idf.erase_flash", arguments)
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Monitor ESP32 Serial",
-        description="Open serial monitor for ESP32",
-    ),
-)
+@mcp.tool()
 def idf_monitor(port: str = None):
-    """Open serial monitor for ESP32."""
+    """Open serial monitor for ESP32"""
     arguments = {}
     if port:
         arguments["port"] = port
     return idf_plugin.execute_tool("idf.monitor", arguments)
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Open ESP32 Menuconfig",
-        description="Open project configuration menu",
-    ),
-)
+@mcp.tool()
 def idf_menuconfig():
-    """Open project configuration menu."""
+    """Open project configuration menu"""
     return idf_plugin.execute_tool("idf.menuconfig", {})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Clean ESP32 Project",
-        description="Clean ESP32 project build files",
-    ),
-)
+@mcp.tool()
 def idf_fullclean():
-    """Clean ESP32 project build files."""
+    """Clean ESP32 project build files"""
     return idf_plugin.execute_tool("idf.fullclean", {})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Set ESP32 Target",
-        description="Set target chip for ESP32 project",
-    ),
-)
+@mcp.tool()
 def idf_set_target(target: str):
-    """Set target chip for ESP32 project."""
+    """Set target chip for ESP32 project"""
     return idf_plugin.execute_tool("idf.set_target", {"target": target})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Get ESP-IDF Version",
-        description="Get ESP-IDF version number",
-    ),
-)
+@mcp.tool()
 def idf_version():
-    """
-    Get ESP-IDF version number.
-    
-    Returns:
-        dict: A dictionary containing the version information or error message.
-    """
+    """Get ESP-IDF version number"""
     try:
         result = idf_plugin.execute_tool("idf.version", {})
         if result.get("success"):
@@ -174,106 +142,56 @@ def idf_version():
         }
 
 # Register Serial tools
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="List Serial Ports",
-        description="List available serial ports",
-    ),
-)
+@mcp.tool()
 def serial_list_ports():
-    """List available serial ports."""
+    """List available serial ports"""
     return serial_plugin.execute_tool("serial.list_ports", {})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Open Serial Port",
-        description="Open serial port for communication",
-    ),
-)
+@mcp.tool()
 def serial_open(port: str, baud: int = 115200):
-    """Open serial port for communication."""
+    """Open serial port for communication"""
     return serial_plugin.execute_tool("serial.open", {"port": port, "baud": baud})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Close Serial Port",
-        description="Close serial port",
-    ),
-)
+@mcp.tool()
 def serial_close(port: str):
-    """Close serial port."""
+    """Close serial port"""
     return serial_plugin.execute_tool("serial.close", {"port": port})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Read Serial Data",
-        description="Read data from serial port",
-    ),
-)
+@mcp.tool()
 def serial_read(port: str, bytes: int = 1024):
-    """Read data from serial port."""
+    """Read data from serial port"""
     return serial_plugin.execute_tool("serial.read", {"port": port, "bytes": bytes})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Write Serial Data",
-        description="Write data to serial port",
-    ),
-)
+@mcp.tool()
 def serial_write(port: str, data: str):
-    """Write data to serial port."""
+    """Write data to serial port"""
     return serial_plugin.execute_tool("serial.write", {"port": port, "data": data})
 
 # Register Monitor tools
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Start Monitoring",
-        description="Start monitoring ESP32 data",
-    ),
-)
+@mcp.tool()
 def monitor_start():
-    """Start monitoring ESP32 data."""
+    """Start monitoring ESP32 data"""
     return monitor_plugin.execute_tool("monitor.start", {})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Stop Monitoring",
-        description="Stop monitoring ESP32 data",
-    ),
-)
+@mcp.tool()
 def monitor_stop():
-    """Stop monitoring ESP32 data."""
+    """Stop monitoring ESP32 data"""
     return monitor_plugin.execute_tool("monitor.stop", {})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Get Monitoring Data",
-        description="Get monitoring data",
-    ),
-)
+@mcp.tool()
 def monitor_get_data():
-    """Get monitoring data."""
+    """Get monitoring data"""
     return monitor_plugin.execute_tool("monitor.get_data", {})
 
 # Register Logger tools
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Get Logs",
-        description="Get system logs",
-    ),
-)
+@mcp.tool()
 def logger_get_logs(lines: int = 100):
-    """Get system logs."""
+    """Get system logs"""
     return logger_plugin.execute_tool("logger.get_logs", {"lines": lines})
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Clear Logs",
-        description="Clear system logs",
-    ),
-)
+@mcp.tool()
 def logger_clear_logs():
-    """Clear system logs."""
+    """Clear system logs"""
     return logger_plugin.execute_tool("logger.clear_logs", {})
 
 def get_transport_config():
@@ -294,7 +212,7 @@ def get_transport_config():
     
     # Override with environment variables if provided
     transport = os.getenv('MCP_TRANSPORT', 'stdio').lower()
-    print(f"Transport: {transport}")
+    # print(f"Transport: {transport}")
     # Validate transport type
     valid_transports = ['stdio', 'streamable-http', 'sse']
     if transport not in valid_transports:
@@ -311,7 +229,7 @@ def get_transport_config():
     return config
 
 if __name__ == "__main__":
-    logger.info("ESP32-MCP FastMCP Server starting...")
+    # logger.info("ESP32-MCP FastMCP Server starting...")
     
     # Get transport configuration
     transport_config = get_transport_config()

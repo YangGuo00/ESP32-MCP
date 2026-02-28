@@ -7,7 +7,7 @@ import time
 def test_idf_version():
     """测试获取IDF版本号"""
     # IDF安装路径
-    idf_path = r"D:\Software\idf\exe\Espressif\frameworks\esp-idf-v5.4.1"
+    idf_path = r"D:\esp32\Espressif\frameworks\esp-idf-v5.3.3"
     
     # 检查IDF路径是否存在
     if not os.path.exists(idf_path):

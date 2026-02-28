@@ -1,3 +1,5 @@
 asyncio>=3.4.3
 pyserial>=3.5
 pyyaml>=6.0
+FastMCP>=3.0.2
+python-dotenv>=1.2.1

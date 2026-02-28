@@ -1,5 +1,7 @@
 from typing import Dict, Any, List
 import os
+import subprocess
+import re
 
 from ...core.plugin_interface import PluginInterface
 from ...utils.logger import get_logger
@@ -314,48 +316,38 @@ class IDFPlugin(PluginInterface):
                     "error": "未设置 ESP_IDF_PATH"
                 }
 
-            # 构建命令：先执行export.bat，然后执行idf.py --version
-            export_bat = os.path.join(self.esp_idf_path, "export.bat")
-            if not os.path.exists(export_bat):
+            if not os.path.exists(self.esp_idf_path):
                 return {
                     "success": False,
-                    "error": f"export.bat文件不存在: {export_bat}"
+                    "error": f"IDF路径不存在: {self.esp_idf_path}"
                 }
 
-            # 使用cmd.exe执行命令，确保在同一个会话中执行
-            cmd = f"cmd.exe /c \"{export_bat} & idf.py --version\""
-            
-            result = self.executor.execute_cmd(cmd)
-            
-            if result["success"]:
-                output = result["stdout"]
-                # 提取版本号信息
-                version_output = None
-                for line in output.split('\n'):
-                    line = line.strip()
-                    if line.startswith('ESP-IDF'):
-                        version_output = line
-                        break
-                
-                if version_output:
-                    return {
-                        "success": True,
-                        "message": f"获取到 ESP-IDF 版本号: {version_output}",
-                        "version": version_output,
-                        "output": output
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": "无法解析 ESP-IDF 版本号",
-                        "output": output
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": result.get("stderr", "获取版本号失败"),
-                    "output": result.get("stdout", "")
-                }
+            cmake_file = os.path.join(self.esp_idf_path, "tools", "cmake", "version.cmake")
+            if os.path.exists(cmake_file):
+                with open(cmake_file, 'r') as f:
+                    content = f.read()
+                    import re
+                    match = re.search(r'set\(IDF_VERSION_MAJOR (\d+)\)', content)
+                    if match:
+                        major = match.group(1)
+                        match = re.search(r'set\(IDF_VERSION_MINOR (\d+)\)', content)
+                        if match:
+                            minor = match.group(1)
+                            match = re.search(r'set\(IDF_VERSION_PATCH (\d+)\)', content)
+                            if match:
+                                patch = match.group(1)
+                                version = f"ESP-IDF v{major}.{minor}.{patch}"
+                                return {
+                                    "success": True,
+                                    "message": f"获取到 ESP-IDF 版本号: {version}",
+                                    "version": version,
+                                    "output": version
+                                }
+
+            return {
+                "success": False,
+                "error": "无法获取 ESP-IDF 版本号，请确保 ESP-IDF 已正确安装"
+            }
                 
         except Exception as e:
             self.logger.error(f"获取 ESP-IDF 版本号时出错: {str(e)}")
@@ -363,3 +355,19 @@ class IDFPlugin(PluginInterface):
                 "success": False,
                 "error": str(e)
             }
+
+if __name__ == "__main__":
+    from ...utils.config_loader import ConfigLoader, load_env_config
+    
+    plugin = IDFPlugin()
+    
+    config_loader = ConfigLoader()
+    config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "config", "config.yaml")
+    config = config_loader.load(config_file)
+    env_config = load_env_config()
+    config.update(env_config)
+    
+    idf_config = config.get("plugins", {}).get("idf", {})
+    plugin.initialize(idf_config)
+    
+    print(plugin._version({}))
