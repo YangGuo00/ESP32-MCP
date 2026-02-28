@@ -104,3 +104,44 @@ class CommandExecutor:
             return result.returncode == 0
         except Exception:
             return False
+
+    def execute_cmd(self, cmd: str, cwd: str = None, timeout: int = None) -> Dict[str, Any]:
+        """执行完整的命令字符串"""
+        try:
+            self.logger.info(f"执行命令: {cmd}")
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=cwd or self.working_dir,
+                shell=True
+            )
+
+            stdout, stderr = process.communicate(timeout=timeout)
+
+            return {
+                "success": process.returncode == 0,
+                "returncode": process.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "command": cmd
+            }
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            self.logger.error(f"命令执行超时: {cmd}")
+            return {
+                "success": False,
+                "error": "命令执行超时",
+                "command": cmd
+            }
+
+        except Exception as e:
+            self.logger.error(f"执行命令时出错: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "command": cmd
+            }

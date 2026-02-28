@@ -131,6 +131,14 @@ class IDFPlugin(PluginInterface):
                         }
                     }
                 }
+            },
+            {
+                "name": "idf.version",
+                "description": "获取 ESP-IDF 版本号",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
 
@@ -151,6 +159,8 @@ class IDFPlugin(PluginInterface):
                 return self._fullclean(arguments)
             elif tool_name == "idf.set_target":
                 return self._set_target(arguments)
+            elif tool_name == "idf.version":
+                return self._version(arguments)
             else:
                 return {
                     "success": False,
@@ -293,4 +303,63 @@ class IDFPlugin(PluginInterface):
                 "success": False,
                 "error": result.get("stderr", "设置目标失败"),
                 "output": result.get("stdout", "")
+            }
+
+    def _version(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """获取 ESP-IDF 版本号"""
+        try:
+            if not self.esp_idf_path:
+                return {
+                    "success": False,
+                    "error": "未设置 ESP_IDF_PATH"
+                }
+
+            # 构建命令：先执行export.bat，然后执行idf.py --version
+            export_bat = os.path.join(self.esp_idf_path, "export.bat")
+            if not os.path.exists(export_bat):
+                return {
+                    "success": False,
+                    "error": f"export.bat文件不存在: {export_bat}"
+                }
+
+            # 使用cmd.exe执行命令，确保在同一个会话中执行
+            cmd = f"cmd.exe /c \"{export_bat} & idf.py --version\""
+            
+            result = self.executor.execute_cmd(cmd)
+            
+            if result["success"]:
+                output = result["stdout"]
+                # 提取版本号信息
+                version_output = None
+                for line in output.split('\n'):
+                    line = line.strip()
+                    if line.startswith('ESP-IDF'):
+                        version_output = line
+                        break
+                
+                if version_output:
+                    return {
+                        "success": True,
+                        "message": f"获取到 ESP-IDF 版本号: {version_output}",
+                        "version": version_output,
+                        "output": output
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "无法解析 ESP-IDF 版本号",
+                        "output": output
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": result.get("stderr", "获取版本号失败"),
+                    "output": result.get("stdout", "")
+                }
+                
+        except Exception as e:
+            self.logger.error(f"获取 ESP-IDF 版本号时出错: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
             }
