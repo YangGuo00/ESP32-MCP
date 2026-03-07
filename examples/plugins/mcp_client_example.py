@@ -53,22 +53,22 @@ async def test_idf_version():
         
         # Connect to the server
         async with stdio_client(server_params) as (read_stream, write_stream):
-            print("✓ 成功连接到服务器")
+            print("[OK] 成功连接到服务器")
             
             # Create client session
             async with ClientSession(read_stream, write_stream) as session:
-                print("✓ 会话已创建")
+                print("[OK] 会话已创建")
                 
                 # Initialize the session with timeout
                 print("正在初始化会话...")
                 try:
                     init_result = await asyncio.wait_for(session.initialize(), timeout=10.0)
-                    print("✓ 会话已初始化")
+                    print("[OK] 会话已初始化")
                 except asyncio.TimeoutError:
-                    print("✗ 会话初始化超时")
+                    print("[ERROR] 会话初始化超时")
                     return
                 except Exception as e:
-                    print(f"✗ 会话初始化失败: {str(e)}")
+                    print(f"[ERROR] 会话初始化失败: {str(e)}")
                     return
                 
                 # List available tools
@@ -85,9 +85,9 @@ async def test_idf_version():
                     else:
                         print("  (无法获取工具列表)")
                 except asyncio.TimeoutError:
-                    print("  ✗ 获取工具列表超时")
+                    print("  [ERROR] 获取工具列表超时")
                 except Exception as e:
-                    print(f"  ✗ 获取工具列表失败: {str(e)}")
+                    print(f"  [ERROR] 获取工具列表失败: {str(e)}")
                 
                 # Call idf_version tool
                 print("\n" + "-" * 70)
@@ -97,7 +97,7 @@ async def test_idf_version():
                 try:
                     result = await asyncio.wait_for(session.call_tool("idf_version", {}), timeout=10.0)
                     
-                    print("\n✓ 工具调用成功")
+                    print("\n[OK] 工具调用成功")
                     print(f"\n返回结果:")
                     print(f"  {result}")
                     
@@ -111,11 +111,31 @@ async def test_idf_version():
                         print(f"\n  原始结果: {result}")
                     
                 except asyncio.TimeoutError:
-                    print("\n✗ 工具调用超时")
+                    print("\n[ERROR] 工具调用超时")
                 except Exception as e:
-                    print(f"\n✗ 工具调用失败: {str(e)}")
+                    print(f"\n[ERROR] 工具调用失败: {str(e)}")
                     import traceback
                     traceback.print_exc()
+                
+                # Example: Call idf_build tool (requires project_path)
+                print("\n" + "-" * 70)
+                print("示例: 调用 idf_build 工具 (需要提供项目路径)")
+                print("-" * 70)
+                print("注意: 以下调用会失败，因为没有提供有效的项目路径")
+                print("正确用法: idf_build(project_path='D:/path/to/your/project', target='esp32')")
+                
+                try:
+                    result = await asyncio.wait_for(
+                        session.call_tool("idf_build", {"project_path": "E:/Desktop/embedded/ESP32/ESP32Pro/01-GPIO", "target": "esp32"}), 
+                        timeout=10.0
+                    )
+                    
+                    print(f"\n返回结果: {result}")
+                    
+                except asyncio.TimeoutError:
+                    print("\n[ERROR] 工具调用超时")
+                except Exception as e:
+                    print(f"\n[ERROR] 工具调用失败: {str(e)}")
     
     except Exception as e:
         print(f"\n✗ 测试失败: {str(e)}")

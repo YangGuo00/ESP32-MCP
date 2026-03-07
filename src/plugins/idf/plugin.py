@@ -7,6 +7,7 @@ from ...core.plugin_interface import PluginInterface
 from ...utils.logger import get_logger
 from ...utils.command_executor import CommandExecutor
 from ...utils.exceptions import IDFCommandError
+from ...utils.idf_controller import IDFController
 
 
 class IDFPlugin(PluginInterface):
@@ -20,7 +21,75 @@ class IDFPlugin(PluginInterface):
         self.esp_idf_path = None
         self.project_path = None
         self.executor = None
+        self.idf_env = None
+        self.idf_controller = None  # IDF 控制器
         self.logger = get_logger(__name__)
+
+    def _load_idf_environment(self):
+        """加载 ESP-IDF 环境变量"""
+        try:
+            # 运行 export.bat 来获取所有环境变量
+            export_bat = os.path.join(self.esp_idf_path, "export.bat")
+            
+            # 使用 cmd /c 来运行 export.bat 并捕获环境变量
+            result = subprocess.run(
+                f'cmd /c "{export_bat} && set"',
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                # 解析环境变量
+                env_vars = {}
+                for line in result.stdout.split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key] = value
+                
+                self.idf_env = env_vars
+                return env_vars
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"加载 ESP-IDF 环境变量时出错: {str(e)}")
+            return None
+
+    def _get_idf_env(self):
+        """获取 ESP-IDF 环境变量"""
+        env = os.environ.copy()
+        if self.idf_env:
+            env.update(self.idf_env)
+        return env
+
+    def _build_error_response(self, operation: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """构建统一的错误响应"""
+        stderr = result.get("stderr", "")
+        stdout = result.get("stdout", "")
+        returncode = result.get("returncode", -1)
+        
+        # 构建详细的错误信息
+        error_parts = []
+        if returncode != 0:
+            error_parts.append(f"返回码: {returncode}")
+        if stderr:
+            error_parts.append(f"错误: {stderr}")
+        if stdout:
+            error_parts.append(f"输出: {stdout[:200] if len(stdout) > 200 else stdout}")
+        
+        error_message = f"{operation}失败"
+        if error_parts:
+            error_message += " - " + "; ".join(error_parts)
+        
+        self.logger.error(f"{operation}失败: {error_message}")
+        return {
+            "success": False,
+            "error": error_message,
+            "output": stdout,
+            "stderr": stderr,
+            "returncode": returncode
+        }
 
     def initialize(self, config: Dict[str, Any]) -> bool:
         """初始化插件"""
@@ -38,7 +107,10 @@ class IDFPlugin(PluginInterface):
                 self.executor = None
                 return True
 
-            self.executor = CommandExecutor(working_dir=self.project_path)
+            # 创建 IDF 控制器
+            self.idf_controller = IDFController(self.esp_idf_path)
+            self.idf_controller.start()  # 启动控制器
+
             self.logger.info(f"IDF 插件初始化成功，ESP-IDF 路径: {self.esp_idf_path}")
             return True
 
@@ -178,134 +250,246 @@ class IDFPlugin(PluginInterface):
 
     def _build(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """编译项目"""
+        project_path = arguments.get("project_path")
         target = arguments.get("target")
-        args = ["build"]
-        if target:
-            args.extend(["--target", target])
-
-        result = self.executor.execute("idf.py", args)
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": "编译成功",
-                "output": result["stdout"]
-            }
-        else:
+        
+        self.logger.info(f"编译参数: {arguments}")
+        self.logger.info(f"project_path: {project_path}, target: {target}")
+        
+        if not project_path:
+            self.logger.warning("缺少 project_path 参数")
             return {
                 "success": False,
-                "error": result.get("stderr", "编译失败"),
-                "output": result.get("stdout", "")
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
             }
+        
+        if not os.path.exists(project_path):
+            self.logger.warning(f"项目路径不存在: {project_path}")
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+        
+        # 设置目标芯片
+        if target:
+            result = self.idf_controller.execute("set-target", args=[target], cwd=project_path)
+            if not result.get("success"):
+                return result
+        
+        # 执行编译
+        result = self.idf_controller.execute("build", cwd=project_path)
+        
+        return result
 
     def _flash(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """烧录固件"""
+        project_path = arguments.get("project_path")
         port = arguments.get("port")
         baud = arguments.get("baud", 460800)
-
+        
+        if not project_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
+            }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+        
+        # 构建命令参数
         args = ["flash"]
         if port:
             args.extend(["-p", port])
         args.extend(["-b", str(baud)])
-
-        result = self.executor.execute("idf.py", args)
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": "烧录成功",
-                "output": result["stdout"]
-            }
-        else:
-            return {
-                "success": False,
-                "error": result.get("stderr", "烧录失败"),
-                "output": result.get("stdout", "")
-            }
+        
+        # 执行烧录
+        result = self.idf_controller.execute("flash", args, cwd=project_path)
+        
+        return result.to_dict()
 
     def _erase_flash(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """擦除 Flash"""
+        project_path = arguments.get("project_path")
         port = arguments.get("port")
+        
+        if not project_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
+            }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+        
+        # 构建命令参数
         args = ["erase-flash"]
         if port:
             args.extend(["-p", port])
-
-        result = self.executor.execute("idf.py", args)
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": "擦除成功",
-                "output": result["stdout"]
-            }
-        else:
-            return {
-                "success": False,
-                "error": result.get("stderr", "擦除失败"),
-                "output": result.get("stdout", "")
-            }
+        
+        # 执行擦除
+        result = self.idf_controller.execute("erase-flash", args, cwd=project_path)
+        
+        return result.to_dict()
 
     def _monitor(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """打开监视器"""
+        project_path = arguments.get("project_path")
         port = arguments.get("port")
+        
+        if not project_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
+            }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+        
+        # 构建命令参数
         args = ["monitor"]
         if port:
             args.extend(["-p", port])
-
-        return {
-            "success": True,
-            "message": f"监视器已启动，端口: {port or '默认'}",
-            "command": f"idf.py {' '.join(args)}"
-        }
+        
+        # 执行监视器
+        result = self.idf_controller.execute("monitor", args, cwd=project_path)
+        
+        return result
 
     def _menuconfig(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """打开配置菜单"""
-        return {
-            "success": True,
-            "message": "配置菜单已打开",
-            "command": "idf.py menuconfig"
-        }
+        project_path = arguments.get("project_path")
+        
+        if not project_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
+            }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+        
+        # 构建命令参数
+        args = ["menuconfig"]
+        
+        # 执行配置菜单
+        result = self.idf_controller.execute("menuconfig", cwd=project_path)
+        
+        return result
 
     def _fullclean(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """完全清理"""
-        result = self.executor.execute("idf.py", ["fullclean"])
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": "清理完成",
-                "output": result["stdout"]
-            }
-        else:
+        project_path = arguments.get("project_path")
+        
+        if not project_path:
             return {
                 "success": False,
-                "error": result.get("stderr", "清理失败"),
-                "output": result.get("stdout", "")
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
             }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
+        # 使用 IDF 控制器执行命令
+        
+        if not self.idf_controller:
+            return {
+                "success": False,
+                "error": "IDF 控制器未启动"
+            }
+
+        # 构建命令参数
+
+        args = ["fullclean"]
+        
+        # 执行清理
+        result = self.idf_controller.execute("fullclean", cwd=project_path)
+        
+        return result
 
     def _set_target(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """设置目标芯片"""
+        project_path = arguments.get("project_path")
         target = arguments.get("target")
+        
+        if not project_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: project_path。请提供 ESP32 项目目录路径"
+            }
+        
+        if not os.path.exists(project_path):
+            return {
+                "success": False,
+                "error": f"项目路径不存在: {project_path}"
+            }
+        
         if not target:
             return {
                 "success": False,
                 "error": "必须指定目标芯片"
             }
-
-        result = self.executor.execute("idf.py", ["set-target", target])
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": f"目标芯片设置为 {target}",
-                "output": result["stdout"]
-            }
-        else:
+        
+        # 使用 IDF 控制器执行命令
+        if not self.idf_controller:
             return {
                 "success": False,
-                "error": result.get("stderr", "设置目标失败"),
-                "output": result.get("stdout", "")
+                "error": "IDF 控制器未启动"
             }
+        
+        # 设置目标芯片
+        result = self.idf_controller.execute("set-target", args=[target], cwd=project_path)
+        
+        return result
 
     def _version(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """获取 ESP-IDF 版本号"""
@@ -355,19 +539,3 @@ class IDFPlugin(PluginInterface):
                 "success": False,
                 "error": str(e)
             }
-
-if __name__ == "__main__":
-    from ...utils.config_loader import ConfigLoader, load_env_config
-    
-    plugin = IDFPlugin()
-    
-    config_loader = ConfigLoader()
-    config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "config", "config.yaml")
-    config = config_loader.load(config_file)
-    env_config = load_env_config()
-    config.update(env_config)
-    
-    idf_config = config.get("plugins", {}).get("idf", {})
-    plugin.initialize(idf_config)
-    
-    print(plugin._version({}))
