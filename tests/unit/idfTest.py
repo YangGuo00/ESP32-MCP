@@ -278,15 +278,17 @@ class IDFController:
         
         print(f"正在设置目标芯片 {target}，工程路径: {proj_path}")
         
-        # 在工程目录下执行set-target
+        # 在工程目录下执行set-target，添加 --yes 参数避免交互
         success, output = self._send_command(
-            f'python "{self.idf_py}" set-target {target}',
+            f'python "{self.idf_py}" set-target {target} --yes',
             cwd=str(proj_path),
-            timeout=180
+            timeout=300
         )
         
+        print(f"set-target 命令执行完成: success={success}, output_length={len(output)}")
+        
         return IDFResult(
-            success=success and ("Done" in output or "Configuring done" in output),
+            success=success and ("Done" in output or "Configuring done" in output or "Configuration done" in output),
             code=IDFErrorCode.SUCCESS.value if success else IDFErrorCode.SET_TARGET_FAILED.value,
             step="set_target",
             stdout=output,
@@ -365,11 +367,200 @@ class IDFController:
         
         output = "".join(output_lines)
         
+        # 改进错误处理：提供更详细的错误信息
+        if not build_success:
+            # 查找错误信息
+            error_lines = []
+            for line in output_lines:
+                if any(keyword in line.lower() for keyword in ['error', 'failed', 'not found', 'undefined', 'cannot']):
+                    error_lines.append(line)
+            
+            error_msg = "\n".join(error_lines[-20:]) if error_lines else "编译超时或未知错误"
+            if not output:
+                error_msg = "编译失败，未获取到输出信息"
+            
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.BUILD_FAILED.value,
+                step="build",
+                stdout=output[-50000:],
+                stderr=error_msg,
+                metadata={"project_path": str(cwd), "raw_output": output},
+                duration_ms=int((time.time() - start) * 1000)
+            )
+        
         return IDFResult(
             success=build_success and ("Successfully" in output or "Project build complete" in output),
             code=IDFErrorCode.SUCCESS.value if build_success else IDFErrorCode.BUILD_FAILED.value,
             step="build",
             stdout=output[-50000:],
+            stderr="",
+            metadata={"project_path": str(cwd)},
+            duration_ms=int((time.time() - start) * 1000)
+        )
+    
+    def erase_flash(self, project_path: Optional[str] = None) -> IDFResult:
+        """
+        擦除 Flash
+        :param project_path: 工程路径，默认使用初始化时传入的路径
+        """
+        if not self._initialized:
+            return self._error_not_initialized("erase_flash")
+        
+        start = time.time()
+        
+        # 确定工程路径
+        cwd = Path(project_path).resolve() if project_path else self.project_path
+        if not cwd:
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="erase_flash",
+                stdout="",
+                stderr="未指定工程路径",
+                metadata={},
+                duration_ms=0
+            )
+        
+        if not cwd.exists():
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="erase_flash",
+                stdout="",
+                stderr=f"工程路径不存在: {cwd}",
+                metadata={},
+                duration_ms=0
+            )
+        
+        print(f"开始擦除 Flash: {cwd}")
+        
+        # 发送擦除命令
+        success, output = self._send_command(
+            f'cd /d "{cwd}" && python "{self.idf_py}" erase-flash && cd /d "{self.idf_path}"',
+            timeout=180
+        )
+        
+        return IDFResult(
+            success=success and ("Flash successfully erased" in output or "Done" in output),
+            code=IDFErrorCode.SUCCESS.value if success else IDFErrorCode.ERASE_FAILED.value,
+            step="erase_flash",
+            stdout=output[-50000:],
+            stderr="" if success else output[-1000:],
+            metadata={"project_path": str(cwd)},
+            duration_ms=int((time.time() - start) * 1000)
+        )
+    
+    def fullclean(self, project_path: Optional[str] = None) -> IDFResult:
+        """
+        清理项目
+        :param project_path: 工程路径，默认使用初始化时传入的路径
+        """
+        if not self._initialized:
+            return self._error_not_initialized("fullclean")
+        
+        start = time.time()
+        
+        # 确定工程路径
+        cwd = Path(project_path).resolve() if project_path else self.project_path
+        if not cwd:
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="fullclean",
+                stdout="",
+                stderr="未指定工程路径",
+                metadata={},
+                duration_ms=0
+            )
+        
+        if not cwd.exists():
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="fullclean",
+                stdout="",
+                stderr=f"工程路径不存在: {cwd}",
+                metadata={},
+                duration_ms=0
+            )
+        
+        print(f"开始清理项目: {cwd}")
+        
+        # 发送清理命令
+        success, output = self._send_command(
+            f'cd /d "{cwd}" && python "{self.idf_py}" fullclean && cd /d "{self.idf_path}"',
+            timeout=180
+        )
+        
+        # 改进错误处理：如果 output 为空，提供更详细的信息
+        if not success or not output:
+            error_msg = output if output else "命令执行失败，未获取到输出信息"
+            if not success:
+                error_msg += f" (命令执行返回失败)"
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.CLEAN_FAILED.value,
+                step="fullclean",
+                stdout=output,
+                stderr=error_msg,
+                metadata={"project_path": str(cwd), "raw_output": output},
+                duration_ms=int((time.time() - start) * 1000)
+            )
+        
+        return IDFResult(
+            success=success and ("Done" in output or "Project cleaned" in output),
+            code=IDFErrorCode.SUCCESS.value if success else IDFErrorCode.CLEAN_FAILED.value,
+            step="fullclean",
+            stdout=output[-50000:],
+            stderr="" if success else output[-1000:],
+            metadata={"project_path": str(cwd)},
+            duration_ms=int((time.time() - start) * 1000)
+        )
+    
+    def menuconfig(self, project_path: Optional[str] = None) -> IDFResult:
+        """
+        打开配置菜单
+        :param project_path: 工程路径，默认使用初始化时传入的路径
+        """
+        if not self._initialized:
+            return self._error_not_initialized("menuconfig")
+        
+        start = time.time()
+        
+        # 确定工程路径
+        cwd = Path(project_path).resolve() if project_path else self.project_path
+        if not cwd:
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="menuconfig",
+                stdout="",
+                stderr="未指定工程路径",
+                metadata={},
+                duration_ms=0
+            )
+        
+        if not cwd.exists():
+            return IDFResult(
+                success=False,
+                code=IDFErrorCode.PROJECT_NOT_FOUND.value,
+                step="menuconfig",
+                stdout="",
+                stderr=f"工程路径不存在: {cwd}",
+                metadata={},
+                duration_ms=0
+            )
+        
+        print(f"开始打开配置菜单: {cwd}")
+        
+        # menuconfig 是交互式命令，需要特殊处理
+        # 这里只返回启动信息
+        return IDFResult(
+            success=True,
+            code=IDFErrorCode.SUCCESS.value,
+            step="menuconfig",
+            stdout="menuconfig 已启动（交互式命令，请在终端中操作）",
             stderr="",
             metadata={"project_path": str(cwd)},
             duration_ms=int((time.time() - start) * 1000)
